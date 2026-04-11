@@ -7,22 +7,31 @@
 # 导入需要的模块
 import glob
 import re, csv, os
+from itertools import product
 from pypinyin import lazy_pinyin, Style
 
 print('正在处理，请稍等……（参考： 平均1万词大约10秒时间，转化完成后，窗口会自动关闭）')
 
 # 判断文件是否存在
-file_list = ['jdAll.csv', 'jdAllx.csv', 'jdf.csv', 'jdy.csv', 'jdyf.csv', 'pinyin.csv', '已有字词.txt', '已有编码.txt', 'result.dict.yaml']
+file_list = ['jdAll.csv', 'jdAllx.csv', 'jdf.csv', 'jdy.csv', 'jdyf.csv', 'pinyin.csv', '已有字词.txt', '已有编码.txt', 'result.dict.yaml', '未匹配音节.txt']
 for file in file_list:
     if os.path.exists(file):
         os.remove(file)
 
 # 把词组存储到 Alltxt 列表中，支持"词组"或"词组\t编码"两种格式
+# 只忽略文件最开头第一条注释，后续 # 注释行会原样保留到输出结果中。
 with open('./All.txt', 'r', encoding='UTF-8-SIG') as f:
     Alltxt = []
+    skipped_leading_comment = False
     for line in f:
-        line = line.rstrip()
+        line = line.rstrip().lstrip('\ufeff')
         if not line:  # 跳过空行
+            continue
+        if line.lstrip().startswith('#'):
+            if not skipped_leading_comment:
+                skipped_leading_comment = True
+                continue
+            Alltxt.append(line)
             continue
         # 如果包含制表符，只取第一部分（词组）
         if '\t' in line:
@@ -30,93 +39,7 @@ with open('./All.txt', 'r', encoding='UTF-8-SIG') as f:
             Alltxt.append(word)
         else:
             Alltxt.append(line)
-
-# 使用 pypinyin 为词组注音，并写入 pinyin.csv（不使用多音字，避免pypinyin数据错误）
-with open('pinyin.csv', 'w', encoding='UTF-8') as Allpinyin:
-    for ci in Alltxt:
-        if not ci:  # 跳过空词
-            continue
-
-        # 使用默认读音（不使用heteronym，避免错误读音）
-        sh = lazy_pinyin(ci, style=Style.INITIALS, strict=False, errors='ignore')
-        un = lazy_pinyin(ci, style=Style.FINALS, strict=False, errors='ignore')
-        Allpinyin.write(ci + '\t')
-        for s, u in zip(sh, un):
-            Allpinyin.write(s + '\'' + u + '\t')
-        Allpinyin.write('\n')
-
-# 提取含飞键的词组到 jdf.csv，以便另外处理
-# 将全拼词组变为列表
-with open('pinyin.csv', 'r', encoding='UTF-8') as file1:
-    data1 = file1.readlines()
-# 提取飞键（识别所有 ch/zh/sh + 'uang 需要双编码）
-with open('jdf.csv', 'w', encoding='UTF-8') as file2:
-    for line in data1:
-        # ch/zh/sh + 'uang 都需要双编码（w/f/e + x 和 w/f/e + m）
-        n = re.findall(r".*\t(ch|zh|sh)'uang\t.*", line)
-        if n:
-            file2.writelines(line)
-
-# 准备把全拼转成键道双拼
-dict1 = {'\t\'':'\tx\'', '\tj\'u\t':'\tjl\t', '\tq\'u\t':'\tql\t', '\tx\'u\t':'\txl\t', '\ty\'u\t':'\tyl\t'} # 零声母引导
-dict2 = {'\'iu\t':'q\t', '\'ua\t':'q\t', '\'ei\t':'w\t', '\'un\t':'w\t', '\'e\t':'e\t', '\'eng\t':'r\t', '\'uan\t':'t\t', '\'iong\t':'y\t', '\'ong\t':'y\t', '\'ang\t':'p\t', '\'a\t':'s\t', '\'ia\t':'s\t', '\'ie\t':'d\t', '\'ou\t':'d\t', '\'an\t':'f\t', '\'ing\t':'g\t', '\'uai\t':'g\t', '\'ai\t':'h\t', '\'ue\t':'h\t', '\'ve\t':'h\t', '\'er\t':'j\t', '\'u\t':'j\t', '\'i\t':'k\t', '\'o\t':'l\t', '\'uo\t':'l\t', '\'v\t':'l\t', '\'ao\t':'z\t', '\'iang\t':'x\t', '\'iao\t':'c\t', '\'in\t':'b\t', '\'ui\t':'b\t', '\'en\t':'n\t', '\'n\t':'n\t', '\'ian\t':'m\t'} # 韵母
-
-# 飞键韵母的两种编码(关键是 uang 的双编码)
-fj_yunmu_1 = {"'uang\t":'m\t', "'ai\t":'h\t', "'an\t":'f\t', "'ang\t":'p\t', "'en\t":'n\t', "'eng\t":'r\t', "'u\t":'j\t', "'un\t":'w\t', "'a\t":'s\t', "'i\t":'k\t', "'ong\t":'y\t', "'ou\t":'d\t', "'ua\t":'q\t', "'uai\t":'g\t', "'uan\t":'t\t', "'ui\t":'b\t', "'uo\t":'l\t', "'ao\t":'z\t', "'e\t":'e\t', "'ei\t":'w\t'}  # 飞键韵母变体1(uang→m)
-fj_yunmu_2 = {"'uang\t":'x\t', "'ai\t":'h\t', "'an\t":'f\t', "'ang\t":'p\t', "'en\t":'n\t', "'eng\t":'r\t', "'u\t":'j\t', "'un\t":'w\t', "'a\t":'s\t', "'i\t":'k\t', "'ong\t":'y\t', "'ou\t":'d\t', "'ua\t":'q\t', "'uai\t":'g\t', "'uan\t":'t\t', "'ui\t":'b\t', "'uo\t":'l\t', "'ao\t":'z\t', "'e\t":'e\t', "'ei\t":'w\t'}  # 飞键韵母变体2(uang→x)
-# 把词组列表转换为字符串
-allPY = "".join(data1)
-# 先将特殊编码及零声母搞定
-for k, v in dict1.items():
-    allPY = allPY.replace(k, v)
-# 固定飞键替换
-allPY = re.sub("\t(ch)(\')(u)\t", r"\tj\2\3\t", allPY)  # chu → j'u
-allPY = re.sub("\t(ch)(\')(ai|ao|an|ang|en|eng|un)\t", r"\tj\2\3\t", allPY)
-allPY = re.sub("\t(ch)(\')(a|e|i|ong|ou|ua|uai|uan|uang|ui|uo)\t", r"\tw\2\3\t", allPY)
-allPY = re.sub("\t(zh)(\')(u)\t", r"\tq\2\3\t", allPY)  # zhu → q'u
-allPY = re.sub("\t(zh)(\')(ai|ao|an|ang|ei|en|eng|un)\t", r"\tq\2\3\t", allPY)
-allPY = re.sub("\t(zh)(\')(a|e|i|ong|ou|ua|uai|uan|uang|ui|uo)\t", r"\tf\2\3\t", allPY)
-allPY = re.sub("\t(sh)(')", r"\te\2", allPY)
-# 飞键韵母替换（使用 fj_yunmu_1，uang→m）（按长度从长到短排序）
-for k, v in sorted(fj_yunmu_1.items(), key=lambda x: len(x[0]), reverse=True):
-    allPY = allPY.replace(k, v)
-# 韵母替换（按长度从长到短排序，避免短韵母破坏长韵母）
-for k, v in sorted(dict2.items(), key=lambda x: len(x[0]), reverse=True):
-    allPY = allPY.replace(k, v)
-# 将键道音码存入 jdy.csv 文件
-with open('jdy.csv', 'w', encoding='UTF-8-sig') as file2:
-    file2.write(allPY)
-
-# 不管了，直接飞键再运行一遍
-with open('jdf.csv', 'r', encoding='UTF-8') as file3:
-    data3 = file3.readlines()
-allPYf = "".join(data3)
-# # 先将特殊编码及零声母搞定
-for k, v in dict1.items():
-    allPYf = allPYf.replace(k, v)
-# # 固定飞键替换
-allPYf = re.sub("\t(ch)(\')(u)\t", r"\tj\2\3\t", allPYf)  # chu → j'u
-allPYf = re.sub("\t(ch)(\')(ai|ao|an|ang|en|eng|un)\t", r"\tj\2\3\t", allPYf)
-allPYf = re.sub("\t(ch)(\')(a|e|i|ong|ou|ua|uai|uan|uang|ui|uo)\t", r"\tw\2\3\t", allPYf)
-allPYf = re.sub("\t(zh)(\')(u)\t", r"\tq\2\3\t", allPYf)  # zhu → q'u
-allPYf = re.sub("\t(zh)(\')(ai|ao|an|ang|ei|en|eng|un)\t", r"\tq\2\3\t", allPYf)
-allPYf = re.sub("\t(zh)(\')(a|e|i|ong|ou|ua|uai|uan|uang|ui|uo)\t", r"\tf\2\3\t", allPYf)
-allPYf = re.sub("\t(sh)(')", r"\te\2", allPYf)
-# # 飞键韵母替换（使用 fj_yunmu_2，uang→x）（按长度从长到短排序）
-for k, v in sorted(fj_yunmu_2.items(), key=lambda x: len(x[0]), reverse=True):
-    allPYf = allPYf.replace(k, v)
-    
-# # 韵母替换（按长度从长到短排序，避免短韵母破坏长韵母）
-for k, v in sorted(dict2.items(), key=lambda x: len(x[0]), reverse=True):
-    allPYf = allPYf.replace(k, v)
-# # 将键道音码存入 jdy.csv 文件
-with open('jdyf.csv', 'w', encoding='UTF-8-sig') as file4:
-    file4.write(allPYf)
-
-# 输出音形码 - 同时处理标准编码和飞键编码以保持顺序
-# 先读取所有标准编码和飞键编码到字典
-jdy_dict = {}  # word -> standard_code
-jdyf_dict = {}  # word -> flying_key_code
+# 使用 py2jd.txt 和自定义注音表统一生成拼音与键道音码
 
 def process_row_to_code(row):
     """将 CSV 行转换为编码"""
@@ -155,47 +78,126 @@ def process_row_to_code(row):
             return None
     return None
 
-# 读取标准编码
-with open('jdy.csv', 'r', newline="", encoding='UTF-8-sig') as csvf:
-    rows = csv.reader(csvf, dialect=csv.excel_tab)
-    for row in rows:
-        while row and row[-1] == '':
-            row.pop()
-        if row:
-            code = process_row_to_code(row)
-            if code:
-                jdy_dict[row[0]] = code
+def load_py2jd_map(path):
+    """读取拼音到键道编码的映射表，支持同一拼音对应多条编码。"""
+    py2jd_map = {}
+    with open(path, 'r', encoding='UTF-8') as f:
+        for line_no, line in enumerate(f, start=1):
+            text = line.strip()
+            if not text or text.startswith('#'):
+                continue
 
-# 读取飞键编码
-with open('jdyf.csv', 'r', newline="", encoding='UTF-8-sig') as csvf:
-    rows = csv.reader(csvf, dialect=csv.excel_tab)
-    for row in rows:
-        while row and row[-1] == '':
-            row.pop()
-        if row:
-            code = process_row_to_code(row)
-            if code:
-                jdyf_dict[row[0]] = code
+            parts = text.split()
+            if len(parts) != 2:
+                print(f'忽略 py2jd.txt 第{line_no}行：格式错误')
+                continue
 
-# 按照 pinyin.csv 的顺序输出，这样保持 All.txt 的原始顺序
-# 同时为每个词输出标准编码和飞键编码(如果存在)
-with open('pinyin.csv', 'r', encoding='UTF-8') as f:
-    with open('jdAll.csv', 'w', encoding='UTF-8-sig') as jda:
-        for line in f:
-            word = line.split('\t')[0]
-            # 先写标准编码(m变体)
-            if word in jdy_dict:
-                jda.write(f"{word}\t{jdy_dict[word]}\n")
-            # 再写飞键编码(x变体)，紧跟在标准编码后面
-            if word in jdyf_dict:
-                code_jdy = jdy_dict.get(word, '')
-                code_jdyf = jdyf_dict[word]
-                # 只有当编码不同时才写入飞键编码
-                if code_jdy != code_jdyf:
-                    jda.write(f"{word}\t{code_jdyf}\n")
+            pinyin, code = parts[0].lower(), parts[1].lower()
+            py2jd_map.setdefault(pinyin, [])
+            if code not in py2jd_map[pinyin]:
+                py2jd_map[pinyin].append(code)
 
-# 去除追加飞键中对编码无影响的三词及以上的 'uang'
-# 注意：二字词需要保留双编码（m和x两种），三字及以上只保留一个
+    return py2jd_map
+
+def load_custom_pinyin(path):
+    """读取自定义注音表，格式为：词组<Tab>拼音。"""
+    custom_map = {}
+    if not os.path.exists(path):
+        return custom_map
+
+    with open(path, 'r', encoding='UTF-8-SIG') as f:
+        for line_no, line in enumerate(f, start=1):
+            text = line.rstrip('\n')
+            if not text.strip() or text.lstrip().startswith('#'):
+                continue
+
+            parts = text.split('\t', 1)
+            if len(parts) != 2:
+                print(f'忽略 custom_pinyin.txt 第{line_no}行：请使用 Tab 分隔')
+                continue
+
+            word = parts[0].strip()
+            syllables = [item.strip().lower() for item in parts[1].split() if item.strip()]
+            if not word or not syllables:
+                print(f'忽略 custom_pinyin.txt 第{line_no}行：词组或拼音为空')
+                continue
+
+            custom_map[word] = syllables
+
+    return custom_map
+
+def get_word_pinyin(word, custom_map):
+    """优先使用自定义注音，其次回退到 pypinyin 默认注音。"""
+    custom_syllables = custom_map.get(word)
+    if custom_syllables:
+        if len(custom_syllables) == len(word):
+            return custom_syllables, 'custom'
+        print(f'custom_pinyin.txt 中“{word}”音节数量与字数不符，改用默认注音')
+
+    syllables = lazy_pinyin(word, style=Style.NORMAL, strict=False, errors='ignore')
+    syllables = [item.lower() for item in syllables if item]
+    return syllables, 'pypinyin'
+
+def expand_word_codes(word, syllables, py2jd_map):
+    """把一个词的拼音列表展开为所有可能的键道编码。"""
+    code_groups = []
+    missing = []
+
+    for syllable in syllables:
+        codes = py2jd_map.get(syllable)
+        if not codes:
+            missing.append(syllable)
+            continue
+        code_groups.append(codes)
+
+    if missing:
+        return [], missing
+
+    word_codes = []
+    seen = set()
+    for combo in product(*code_groups):
+        code = process_row_to_code([word] + list(combo))
+        if code and code not in seen:
+            seen.add(code)
+            word_codes.append(code)
+
+    return word_codes, []
+
+py2jd_map = load_py2jd_map('py2jd.txt')
+custom_pinyin_map = load_custom_pinyin('custom_pinyin.txt')
+missing_entries = []
+
+# 统一生成注音结果和音码结果，键道规则完全以 py2jd.txt 为准。
+with open('pinyin.csv', 'w', encoding='UTF-8-sig') as pinyin_file, open('jdAll.csv', 'w', encoding='UTF-8-sig') as jda:
+    for word in Alltxt:
+        if not word:
+            continue
+        if word.lstrip().startswith('#'):
+            pinyin_file.write(word + '\n')
+            jda.write(word + '\n')
+            continue
+
+        syllables, source = get_word_pinyin(word, custom_pinyin_map)
+        if len(syllables) != len(word):
+            missing_entries.append(f'{word}\t注音数量与字数不符\t{" ".join(syllables)}')
+            continue
+
+        pinyin_file.write(word + '\t' + '\t'.join(syllables) + '\n')
+
+        word_codes, missing = expand_word_codes(word, syllables, py2jd_map)
+        if missing:
+            missing_entries.append(f'{word}\t缺少拼音映射\t{" ".join(missing)}\t来源:{source}')
+            continue
+
+        for code in word_codes:
+            jda.write(f"{word}\t{code}\n")
+
+if missing_entries:
+    with open('未匹配音节.txt', 'w', encoding='UTF-8-sig') as f:
+        for entry in missing_entries:
+            f.write(entry + '\n')
+
+# 去除重复编码，保留多编码词条
 # 使用手动去重保持 All.txt 的原始顺序
 seen_entries = set()  # 用于去重
 result_lines = []
@@ -205,6 +207,9 @@ with open('jdAll.csv', 'r', encoding='UTF-8-sig') as f:
         line = line.strip()
         if not line:
             continue
+        if line.startswith('#'):
+            result_lines.append(line + '\n')
+            continue
 
         parts = line.split('\t')
         if len(parts) != 2:
@@ -213,22 +218,10 @@ with open('jdAll.csv', 'r', encoding='UTF-8-sig') as f:
         word = parts[0].replace('\ufeff', '').strip()
         code = parts[1].strip()
 
-        # 跳过分隔行
-        if word.startswith('#'):
-            continue
-
-        # 二字词：保留所有不同的编码（双编码）
-        if len(code) == 4:
-            key = f"{word}_{code}"
-            if key not in seen_entries:
-                seen_entries.add(key)
-                result_lines.append(f"{word}\t{code}\n")
-        # 三字及以上词：只保留第一个编码（去重）
-        else:
-            if word not in seen_entries:
-                seen_entries.add(word)
-                result_lines.append(f"{word}\t{code}\n")
-
+        key = f"{word}_{code}"
+        if key not in seen_entries:
+            seen_entries.add(key)
+            result_lines.append(f"{word}\t{code}\n")
 # 写回文件，保持原始顺序
 with open('jdAll.csv', 'w', encoding='UTF-8-sig') as f:
     f.writelines(result_lines)
@@ -248,8 +241,8 @@ with open('jdAll.csv', 'r', encoding='UTF-8-sig') as file:
 # 添加形码
 with open('jdAllx.csv', 'w', encoding='UTF-8') as jdAllx:
     for cizu in datax:
-        # 跳过飞键分割线（格式: #飞键 + tab + 长编码）
-        if cizu.startswith('#飞键'):
+        # 保留注释行
+        if cizu.lstrip().startswith('#'):
             jdAllx.write(cizu)
             continue
 
@@ -355,7 +348,14 @@ bm_repe_set = set()  # 用于记录当前转换过程中已使用的编码
 
 with open('jdAllx.csv', 'r', encoding='utf-8') as file:
     for line in file:
-        parts = line.strip().split('\t')
+        stripped_line = line.strip()
+        if not stripped_line:
+            continue
+        if stripped_line.startswith('#'):
+            temp_list.append(stripped_line)
+            continue
+
+        parts = stripped_line.split('\t')
         if len(parts) != 2:
             continue
         word, line_bm = parts
@@ -436,3 +436,7 @@ with open('./result.dict.yaml', 'w', encoding='utf-8') as outfile:
     outfile.write(content)
     for line in temp_list:  # 使用 temp_list 保持 All.txt 的原始顺序
         outfile.write(line+"\n")
+
+
+
+

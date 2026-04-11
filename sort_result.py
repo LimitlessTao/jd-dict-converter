@@ -7,7 +7,7 @@ import os
 import sys
 
 def read_yaml_content(file_path):
-    """读取 YAML 文件，分离头部和词条（支持有头部和无头部两种情况）"""
+    """读取 YAML 文件，分离头部、正文结构和可排序词条。"""
     if not os.path.exists(file_path):
         print(f"错误：文件 {file_path} 不存在！")
         sys.exit(1)
@@ -15,8 +15,8 @@ def read_yaml_content(file_path):
     with open(file_path, 'r', encoding='utf-8') as f:
         lines = f.readlines()
 
-    # 分离 YAML 头部和词条内容
     header = []
+    body_items = []
     entries = []
     in_header = False
     has_header = False
@@ -33,10 +33,17 @@ def read_yaml_content(file_path):
             in_header = False
         elif in_header:
             header.append(line)
-        elif '\t' in line:  # 词条行（包含制表符）
-            entries.append(line.strip())
+        else:
+            raw_line = line.rstrip('\n')
+            if raw_line.lstrip().startswith('#'):
+                body_items.append(('comment', raw_line))
+            elif '\t' in raw_line:
+                body_items.append(('entry', raw_line))
+                entries.append(raw_line)
+            else:
+                body_items.append(('raw', raw_line))
 
-    return header, entries
+    return header, body_items, entries
 
 def sort_by_code(entries):
     """按编码排序（字母顺序）"""
@@ -72,8 +79,8 @@ def sort_by_word(entries):
 
     return sorted(entries, key=get_word)
 
-def write_yaml_file(file_path, header, entries, backup=True):
-    """写入排序后的 YAML 文件"""
+def write_yaml_file(file_path, header, body_items, entries, backup=True):
+    """写入排序后的 YAML 文件，同时保留注释与原始位置。"""
     # 备份原文件
     if backup and os.path.exists(file_path):
         backup_path = file_path + '.backup'
@@ -81,12 +88,16 @@ def write_yaml_file(file_path, header, entries, backup=True):
         shutil.copy(file_path, backup_path)
         print(f"已备份原文件到: {backup_path}")
 
+    entry_iter = iter(entries)
     with open(file_path, 'w', encoding='utf-8') as f:
         # 写入头部
         f.writelines(header)
-        # 写入排序后的词条
-        for entry in entries:
-            f.write(entry + '\n')
+        # 写入正文，注释和其他非词条内容保持原位置
+        for item_type, content in body_items:
+            if item_type == 'entry':
+                f.write(next(entry_iter) + '\n')
+            else:
+                f.write(content + '\n')
 
     print(f"排序完成！共处理 {len(entries)} 条词组")
 
@@ -107,7 +118,7 @@ def main():
 
     # 读取文件
     print("正在读取文件...")
-    header, entries = read_yaml_content(file_path)
+    header, body_items, entries = read_yaml_content(file_path)
     print(f"读取成功！共 {len(entries)} 条词组")
     print()
 
@@ -143,7 +154,7 @@ def main():
         return
 
     # 写入文件
-    write_yaml_file(file_path, header, sorted_entries, backup=True)
+    write_yaml_file(file_path, header, body_items, sorted_entries, backup=True)
 
     # 显示示例
     print("\n排序后的前 10 条示例：")

@@ -274,10 +274,13 @@ xue	xh
 xun	xw
 zha	fs
 zhe	fe
+zhe	qe
 zhi	fk
 zhu	qj
 zhai	qh
+zhai	fh
 zhao	qz
+zhao	fz
 zhan	qf
 zhang	qp
 zhou	fd
@@ -295,9 +298,11 @@ zhun	qw
 zhuo	fl
 cha	ws
 che	we
+che	je
 chi	wk
 chu	jj
 chai	jh
+chao	wz
 chao	jz
 chan	jf
 chang	jp
