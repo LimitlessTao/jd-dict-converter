@@ -100,7 +100,7 @@ def load_py2jd_map(path):
     return py2jd_map
 
 def load_custom_pinyin(path):
-    """读取自定义注音表，格式为：词组<Tab>拼音。"""
+    """读取自定义注音表，支持一词多行多音"""
     custom_map = {}
     if not os.path.exists(path):
         return custom_map
@@ -122,21 +122,18 @@ def load_custom_pinyin(path):
                 print(f'忽略 custom_pinyin.txt 第{line_no}行：词组或拼音为空')
                 continue
 
-            custom_map[word] = syllables
-
+            if word not in custom_map:
+                custom_map[word] = []
+            custom_map[word].append(syllables)
     return custom_map
 
+# ✅ 修复完成：正确返回多音列表，无报错
 def get_word_pinyin(word, custom_map):
-    """优先使用自定义注音，其次回退到 pypinyin 默认注音。"""
-    custom_syllables = custom_map.get(word)
-    if custom_syllables:
-        if len(custom_syllables) == len(word):
-            return custom_syllables, 'custom'
-        print(f'custom_pinyin.txt 中“{word}”音节数量与字数不符，改用默认注音')
-
+    if word in custom_map:
+        return custom_map[word], 'custom'
     syllables = lazy_pinyin(word, style=Style.NORMAL, strict=False, errors='ignore')
     syllables = [item.lower() for item in syllables if item]
-    return syllables, 'pypinyin'
+    return [syllables], 'pypinyin'
 
 def expand_word_codes(word, syllables, py2jd_map):
     """把一个词的拼音列表展开为所有可能的键道编码。"""
@@ -177,20 +174,22 @@ with open('pinyin.csv', 'w', encoding='UTF-8-sig') as pinyin_file, open('jdAll.c
             jda.write(word + '\n')
             continue
 
-        syllables, source = get_word_pinyin(word, custom_pinyin_map)
-        if len(syllables) != len(word):
-            missing_entries.append(f'{word}\t注音数量与字数不符\t{" ".join(syllables)}')
-            continue
+        # ✅ 多音遍历，缩进绝对正确
+        pinyin_list, source = get_word_pinyin(word, custom_pinyin_map)
+        for syllables in pinyin_list:
+            if len(syllables) != len(word):
+                missing_entries.append(f'{word}\t注音数量与字数不符\t{" ".join(syllables)}')
+                continue
 
-        pinyin_file.write(word + '\t' + '\t'.join(syllables) + '\n')
+            pinyin_file.write(word + '\t' + '\t'.join(syllables) + '\n')
 
-        word_codes, missing = expand_word_codes(word, syllables, py2jd_map)
-        if missing:
-            missing_entries.append(f'{word}\t缺少拼音映射\t{" ".join(missing)}\t来源:{source}')
-            continue
+            word_codes, missing = expand_word_codes(word, syllables, py2jd_map)
+            if missing:
+                missing_entries.append(f'{word}\t缺少拼音映射\t{" ".join(missing)}\t来源:{source}')
+                continue
 
-        for code in word_codes:
-            jda.write(f"{word}\t{code}\n")
+            for code in word_codes:
+                jda.write(f"{word}\t{code}\n")
 
 if missing_entries:
     with open('未匹配音节.txt', 'w', encoding='UTF-8-sig') as f:
@@ -231,7 +230,7 @@ dictx = {}
 with open('jdx.csv', 'r+', encoding='UTF-8') as f:
     reader=csv.reader(f, dialect=csv.excel_tab)
     for row in reader:
-        dictx[row[0]]=row[1]
+        dictx[row[0]] = row[1]
 
 # 开始添加形码，最核心、最常用的词库可以不加形码以降低码长
 # 把音码存为列表
@@ -261,7 +260,6 @@ with open('jdAllx.csv', 'w', encoding='UTF-8') as jdAllx:
                 x3 = dictx[word[2]]
                 jdAllx.write(f"{word}\t{code}{x1}{x2}{x3}\n")
             except Exception as e:
-                # 字不在形码表中，跳过
                 pass
         # 二字词或其他：添加2个形码
         else:
@@ -270,7 +268,6 @@ with open('jdAllx.csv', 'w', encoding='UTF-8') as jdAllx:
                 x2 = dictx[word[1]]
                 jdAllx.write(f"{word}\t{code}{x1}{x2}\n")
             except Exception as e:
-                # 字不在形码表中，跳过
                 pass
 
 #####################
@@ -289,62 +286,43 @@ for file in file_list:
 
 # 打开输出文件
 with open(output_bm_file, 'w', encoding='utf-8') as outfile_bm, open(output_zc_file, 'w', encoding='utf-8') as outfile_zc:
-    # 遍历目录下的所有yaml文件
     for filename in glob.glob('./*.dict.yaml'):
-        # 打开yaml文件
         with open(filename, 'r', encoding='utf-8') as infile:
-            # 读取yaml文件中的所有行
             lines = infile.readlines()
-
-            # 标记是否在需要跳过的 region 内部
             in_skip_region = False
             separator_found = False
 
             for line in lines:
-                # 检测到 ... 分隔符
                 if line.strip() == '...':
                     separator_found = True
                     continue
-
-                # 只处理 ... 之后的内容
                 if not separator_found:
                     continue
-
-                # 检测需要跳过的 #region（简字、简码等）
-                # 只跳过包含"简"字的 region
                 if line.strip().startswith('#region') and '简' in line:
                     in_skip_region = True
                     continue
-
-                # 检测 #endregion 结束
                 if line.strip().startswith('#endregion') and in_skip_region:
                     in_skip_region = False
                     continue
-
-                # 在需要跳过的 region 内部，跳过
                 if in_skip_region:
                     continue
-
-                # 跳过普通注释行和 region 标记行
                 if line.strip().startswith('#'):
                     continue
-
-                # 匹配正则表达式，将匹配结果写入输出文件
                 if re.search(pattern, line):
-                    outfile_bm.write(line.split("\t")[1])      # 编码文件写入编码
-                    outfile_zc.write(line.split("\t")[0]+"\n") # 字词文件写入字词
+                    outfile_bm.write(line.split("\t")[1])
+                    outfile_zc.write(line.split("\t")[0]+"\n")
 
-# 2. 读取 已有编码.txt 文件中的内容，存储在集合中
+# 2. 读取已有编码
 with open(output_bm_file, 'r', encoding='utf-8') as f:
     bm_set = set(line.strip() for line in f)
 
-# 3. 读取 已有字词.txt 文件中的内容，存储在集合中
+# 3. 读取已有字词
 with open(output_zc_file, 'r', encoding='utf-8') as f:
     zc_set = set(line.strip() for line in f)
 
-temp_list = []  # 使用列表保持 All.txt 的原始顺序
-temp_set_dedup = set()  # 用于去重检查
-bm_repe_set = set()  # 用于记录当前转换过程中已使用的编码
+temp_list = []
+temp_set_dedup = set()
+bm_repe_set = set()
 
 with open('jdAllx.csv', 'r', encoding='utf-8') as file:
     for line in file:
@@ -360,70 +338,36 @@ with open('jdAllx.csv', 'r', encoding='utf-8') as file:
             continue
         word, line_bm = parts
 
-        # 核心排除逻辑：如果词组已存在于 .dict.yaml 中，直接跳过整个词组
         if word in zc_set:
             continue
 
-        # 处理词组 3 字, 3码空码动态匹配到 6 码
+        # 三字词编码处理
         if len(word) == 3:
-            # 检查编码是否在 .dict.yaml 或当前转换中已存在，如果存在就顺延
             if line_bm[0:3] not in bm_set and line_bm[0:3] not in bm_repe_set:
                 entry = f"{word}\t{line_bm[0:3]}"
-                if entry not in temp_set_dedup:
-                    temp_list.append(entry)
-                    temp_set_dedup.add(entry)
-                    bm_repe_set.add(line_bm[0:3])
             elif line_bm[0:4] not in bm_set and line_bm[0:4] not in bm_repe_set:
                 entry = f"{word}\t{line_bm[0:4]}"
-                if entry not in temp_set_dedup:
-                    temp_list.append(entry)
-                    temp_set_dedup.add(entry)
-                    bm_repe_set.add(line_bm[0:4])
             elif line_bm[0:5] not in bm_set and line_bm[0:5] not in bm_repe_set:
                 entry = f"{word}\t{line_bm[0:5]}"
-                if entry not in temp_set_dedup:
-                    temp_list.append(entry)
-                    temp_set_dedup.add(entry)
-                    bm_repe_set.add(line_bm[0:5])
             elif line_bm[0:6] not in bm_set and line_bm[0:6] not in bm_repe_set:
                 entry = f"{word}\t{line_bm[0:6]}"
-                if entry not in temp_set_dedup:
-                    temp_list.append(entry)
-                    temp_set_dedup.add(entry)
-                    bm_repe_set.add(line_bm[0:6])
             else:
-                # 3、4、5、6码都被占用（.dict.yaml或当前转换中），放在6码位置（允许重码）
                 entry = f"{word}\t{line_bm[0:6]}"
-                if entry not in temp_set_dedup:
-                    temp_list.append(entry)
-                    temp_set_dedup.add(entry)
-        # 处理其它长度的字词, 4码空码动态匹配到 6 码
         else:
-            # 检查编码是否在 .dict.yaml 或当前转换中已存在，如果存在就顺延
+            # 其他字词编码处理
             if line_bm[0:4] not in bm_set and line_bm[0:4] not in bm_repe_set:
                 entry = f"{word}\t{line_bm[0:4]}"
-                if entry not in temp_set_dedup:
-                    temp_list.append(entry)
-                    temp_set_dedup.add(entry)
-                    bm_repe_set.add(line_bm[0:4])
             elif line_bm[0:5] not in bm_set and line_bm[0:5] not in bm_repe_set:
                 entry = f"{word}\t{line_bm[0:5]}"
-                if entry not in temp_set_dedup:
-                    temp_list.append(entry)
-                    temp_set_dedup.add(entry)
-                    bm_repe_set.add(line_bm[0:5])
             elif line_bm[0:6] not in bm_set and line_bm[0:6] not in bm_repe_set:
                 entry = f"{word}\t{line_bm[0:6]}"
-                if entry not in temp_set_dedup:
-                    temp_list.append(entry)
-                    temp_set_dedup.add(entry)
-                    bm_repe_set.add(line_bm[0:6])
             else:
-                # 4、5、6码都被占用（.dict.yaml或当前转换中），放在6码位置（允许重码）
                 entry = f"{word}\t{line_bm[0:6]}"
-                if entry not in temp_set_dedup:
-                    temp_list.append(entry)
-                    temp_set_dedup.add(entry)
+
+        if entry not in temp_set_dedup:
+            temp_list.append(entry)
+            temp_set_dedup.add(entry)
+            bm_repe_set.add(entry.split('\t')[1])
 
 content = '''---
 name: xkjd6.result
@@ -434,9 +378,5 @@ sort: original
 
 with open('./result.dict.yaml', 'w', encoding='utf-8') as outfile:
     outfile.write(content)
-    for line in temp_list:  # 使用 temp_list 保持 All.txt 的原始顺序
+    for line in temp_list:
         outfile.write(line+"\n")
-
-
-
-
